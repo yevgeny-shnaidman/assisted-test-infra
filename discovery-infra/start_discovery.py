@@ -43,7 +43,8 @@ def fill_tfvars(
         master_count,
         nodes_details,
         tf_folder,
-        machine_net
+        machine_net,
+        static_ips_flag
 ):
     tfvars_json_file = os.path.join(tf_folder, consts.TFVARS_JSON_NAME)
     with open(tfvars_json_file) as _file:
@@ -87,6 +88,9 @@ def fill_tfvars(
     if machine_net.has_ip_v6:
         machine_cidr_addresses += [machine_net.cidr_v6]
         provisioning_cidr_addresses += [machine_net.provisioning_cidr_v6]
+
+    if static_ips_flag:
+        tfvars['static_macs'] = True
 
     tfvars['machine_cidr_addresses'] = machine_cidr_addresses
     tfvars['provisioning_cidr_addresses'] = provisioning_cidr_addresses
@@ -157,7 +161,8 @@ def create_nodes(
         master_count,
         nodes_details,
         tf,
-        machine_net
+        machine_net,
+        static_ips_flag
 ):
     log.info("Creating tfvars")
     fill_tfvars(
@@ -166,7 +171,8 @@ def create_nodes(
         master_count=master_count,
         nodes_details=nodes_details,
         tf_folder=tf.working_dir,
-        machine_net=machine_net
+        machine_net=machine_net,
+        static_ips_flag=static_ips_flag
     )
     log.info('Start running terraform')
     with utils.file_lock_context():
@@ -183,7 +189,8 @@ def create_nodes_and_wait_till_registered(
         master_count,
         nodes_details,
         tf,
-        machine_net
+        machine_net,
+        static_ips_flag
 ):
     nodes_count = master_count + nodes_details["worker_count"]
     create_nodes(
@@ -193,7 +200,8 @@ def create_nodes_and_wait_till_registered(
         master_count=master_count,
         nodes_details=nodes_details,
         tf=tf,
-        machine_net=machine_net
+        machine_net=machine_net,
+        static_ips_flag=static_ips_flag
     )
 
     # TODO: Check for only new nodes
@@ -373,7 +381,8 @@ def nodes_flow(client, cluster_name, cluster, image_path):
         master_count=args.master_count,
         nodes_details=nodes_details,
         tf=tf,
-        machine_net=machine_net
+        machine_net=machine_net,
+        static_ips_flag=args.static_ips_config
     )
 
     if client:
@@ -399,6 +408,9 @@ def nodes_flow(client, cluster_name, cluster, image_path):
             log.info("VIPs already configured")
 
         set_hosts_roles(client, cluster, nodes_details, machine_net, tf, args.master_count)
+
+        if args.static_ips_config:
+            set_hostames_for_static_ips_hosts(client, cluster.id)
 
         utils.wait_till_hosts_with_macs_are_in_status(
             client=client,
@@ -446,6 +458,28 @@ def set_hosts_roles(client, cluster, nodes_details, machine_net, tf, master_coun
                        update_roles=master_count > 1)
 
 
+def parse_static_ips_config(config_file):
+    with open(config_file) as _file:
+        res = json.load(_file)
+        return res
+
+
+def set_hostames_for_static_ips_hosts(client, cluster_id):
+    master_idx = 0
+    worker_idx = 0
+    hostnames = []
+    hosts = client.get_cluster_hosts(cluster_id)
+    for host in hosts:
+        if host["role"] == "master":
+            host_idx = master_idx
+            master_idx = master_idx + 1
+        else:
+            host_idx = worker_idx
+            worker_idx = worker_idx + 1
+        hostnames.append({"id": host["id"], "hostname": "{}-static-ip-{}".format(host['role'], host_idx)})
+    client.update_hosts(cluster_id=cluster_id, hosts_with_roles=None, hosts_names=hostnames)
+
+
 def execute_day1_flow(cluster_name):
     client = None
     cluster = {}
@@ -485,10 +519,17 @@ def execute_day1_flow(cluster_name):
             consts.IMAGE_FOLDER,
             f'{args.namespace}-installer-image.iso'
         )
+
+        if args.static_ips_config:
+            static_ips = parse_static_ips_config(args.static_ips_config)
+        else:
+            static_ips = None
+
         client.generate_and_download_image(
             cluster_id=cluster.id,
             image_path=image_path,
             ssh_key=args.ssh_key,
+            static_ips=static_ips,
         )
 
     # Iso only, cluster will be up and iso downloaded but vm will not be created
@@ -617,6 +658,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-ps", "--pull-secret", help="Pull secret", type=str, default=""
+    )
+    parser.add_argument(
+        "-sic", "--static-ips-config", help="Static ips configuration file", type=str, default=""
     )
     parser.add_argument(
         "-bd",
