@@ -98,6 +98,24 @@ def fill_tfvars(
     tfvars['libvirt_storage_pool_path'] = storage_path
     tfvars.update(nodes_details)
 
+    if nodes_details["static_ips_config"]:
+        tfvars['master_macs'] = _generate_macs(master_count)
+        tfvars['worker_macs'] = _generate_macs(worker_count)
+        master_static_starting_ip = str(
+                ipaddress.ip_address(
+                    ipaddress.IPv4Network(machine_net.cidr_v4).network_address
+                )
+                + 30
+        )
+        worker_static_starting_ip = str(
+                ipaddress.ip_address(
+                    ipaddress.IPv4Network(machine_net.cidr_v4).network_address
+                )
+                + 10
+                + int(tfvars["master_count"])
+        )
+    )
+
     tfvars.update(_secondary_tfvars(master_count, nodes_details, machine_net))
 
     with open(tfvars_json_file, "w") as _file:
@@ -151,6 +169,10 @@ def _secondary_tfvars(master_count, nodes_details, machine_net):
             'libvirt_secondary_worker_ips': utils.create_empty_nested_list(worker_count),
             'libvirt_secondary_master_ips': utils.create_empty_nested_list(master_count)
         }
+
+
+def _generate_macs(count):
+    return ["02:00:00:%02x:%02x:%02x" % (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)) for x in count]
 
 
 # Run make run terraform -> creates vms
@@ -310,6 +332,7 @@ def _create_node_details(cluster_name):
         'libvirt_secondary_network_name': consts.TEST_SECONDARY_NETWORK + args.namespace,
         'libvirt_secondary_network_if': f's{args.network_bridge}',
         'bootstrap_in_place': args.master_count == 1,
+        "static_ips_config": args.static_ips_config,
     }
 
 
