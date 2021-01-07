@@ -7,7 +7,7 @@ import ipaddress
 import json
 import os
 import time
-import random
+# import random
 import distutils.util
 from netaddr import IPNetwork
 
@@ -18,6 +18,7 @@ import day2
 from logger import log
 from test_infra.utils import config_etc_hosts
 from test_infra.tools import terraform_utils
+from test_infra.tools import static_ips
 import bootstrap_in_place as ibip
 
 
@@ -546,8 +547,10 @@ def execute_day1_flow(cluster_name):
         )
 
         if args.static_ips_config:
+            import pdb
+            pdb.set_trace()
             machine_net = MachineNetwork(args.ipv4, args.ipv6, args.vm_network_cidr, args.vm_network_cidr6, args.ns_index)
-            static_ips_config, static_macs = _generate_static_ips_data(args.master_count, args.number_of_workers, machine_net)
+            static_ips_config, static_macs = static_ips.generate_static_ips_data(args.master_count, args.number_of_workers, machine_net)
         else:
             static_ips_config = None
             static_macs = None
